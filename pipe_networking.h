@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <errno.h>
+#include <signal.h>
 
 #ifndef NETWORKING_H
 #define NETWORKING_H
@@ -14,8 +15,9 @@
 #define HANDSHAKE_BUFFER_SIZE 10
 #define BUFFER_SIZE 1000
 
-int server_handshake(int *to_client);
-
+int server_handshake(char * pid);
+int subserver_handshake(int * to_client, char * pid, int from_client);
 int client_handshake(int *to_server);
+
 
 #endif

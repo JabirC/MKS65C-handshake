@@ -5,48 +5,40 @@
   server_handshake
   args: int * to_client
 
-  Performs the client side pipe 3 way handshake.
+  Performs the server side pipe 3 way handshake.
   Sets *to_client to the file descriptor to the downstream pipe.
 
   returns the file descriptor for the upstream pipe.
   =========================*/
-int server_handshake(int *to_client) {
-        int up;
-        mkfifo("srvr", 0644);
+int server_handshake(char * pid) {
+  printf("[Server] Creating wkp...\n" );
+  int r = mkfifo("wkp", 0644);
+  if (r < 0) printf("Error %d: %s\n", errno, strerror(errno));
 
-        printf("\n$$SERVER$$ Server has created well known pipe, Waiting for client\n");
+  printf("[Server] Receiving from client...\n" );
+  int from_client = open("wkp", O_RDONLY);
+  read(from_client, pid, sizeof(pid)); // reading client's pid/FIFO name
+  printf("[Server] Message received: %s\n", pid);
 
-        up =open("srvr",O_RDONLY);
-        if(up == -1){
-          printf("%s \n",strerror(errno));
-        }
-        else{
-          char buffer[HANDSHAKE_BUFFER_SIZE];
-          read(up, buffer, HANDSHAKE_BUFFER_SIZE);
-          printf("$$SERVER$$ Server received private pipe name %s, sending acknowledgement\n", buffer);
-          close(up);
-          remove("srvr");
+  printf("[Server] Removing wkp...\n" );
+  remove("wkp");
 
-          *to_client = open(buffer, O_WRONLY);
-          if(*to_client == -1){
-            printf("%s \n",strerror(errno));
-          }
-          else{
-            write(*to_client,ACK , HANDSHAKE_BUFFER_SIZE);
-            close(*to_client);
 
-            char client_resp[HANDSHAKE_BUFFER_SIZE];
-            *to_client = open(buffer, O_RDONLY);
-            read(*to_client, client_resp, HANDSHAKE_BUFFER_SIZE);
-            printf("$$SERVER$$ Received response from client: %s\n", client_resp);
-            close(*to_client);
-            printf("$$SERVER$$ Handshake Complete\n");
-
-            return up;
-          }
-        }
+  return from_client;
 }
 
+int subserver_handshake(int * to_client, char * pid, int from_client) {
+  printf("Writing ack to private pipe...\n" );
+  *to_client = open(pid, O_WRONLY);
+  write(*to_client, ACK, sizeof(ACK));
+
+  printf("Receiving from client...\n" );
+  char clbuf[HANDSHAKE_BUFFER_SIZE];
+  read(from_client, clbuf, sizeof(clbuf));
+  printf("Message received: %s\n", clbuf);
+
+  return from_client;
+}
 
 /*=========================
   client_handshake
@@ -58,36 +50,27 @@ int server_handshake(int *to_client) {
   returns the file descriptor for the downstream pipe.
   =========================*/
 int client_handshake(int *to_server) {
-  mkfifo("privi", 0644);
+  printf("[Client] Creating private pipe...\n" );
+  char pid[HANDSHAKE_BUFFER_SIZE];
+  sprintf(pid, "%d", getpid());
+  int r = mkfifo(pid, 0644 | O_CREAT);
+  if (r < 0) printf("Error %d: %s\n", errno, strerror(errno));
 
-  *to_server = open("srvr", O_WRONLY);
-  if(*to_server== -1){
-    printf("%s, Well-known pipe not found \n",strerror(errno));
-  }
-  else{
-    char pvt_name[HANDSHAKE_BUFFER_SIZE];
-    strcpy(pvt_name, "privi");
-    write(*to_server, pvt_name, HANDSHAKE_BUFFER_SIZE);
-    printf("$$CLIENT$$ Client has sent private pipe name: %s\n", pvt_name);
-    char buffer_client[BUFFER_SIZE];
+  printf("[Client] Writing PID to wkp...\n" );
+  *to_server = open("wkp", O_WRONLY);
+  write(*to_server, pid, sizeof(pid));
 
-    int down = open(pvt_name, O_RDONLY);
-    if (down == -1){
-      printf("%s\n",strerror(errno));
-    }
-    else{
-      read(down, buffer_client, HANDSHAKE_BUFFER_SIZE);
-      printf("$$CLIENT$$ Client received acknowledgement from server: '%s', sending response\n", buffer_client);
-      close(down);
+  printf("[Client] Receiving from private pipe...\n" );
+  int prvfd = open(pid, O_RDONLY);
+  char serverbuf[HANDSHAKE_BUFFER_SIZE];
+  read(prvfd, serverbuf, sizeof(serverbuf));
+  printf("[Client] Message received: %s\n", serverbuf);
 
+  printf("[Client] Removing private pipe...\n" );
+  remove(pid);
 
-      down = open(pvt_name, O_WRONLY);
-      char last[HANDSHAKE_BUFFER_SIZE] = "Adios!";
-      write(down, last, HANDSHAKE_BUFFER_SIZE);
-      close(down);
-      printf("$$CLIENT$$ Handshake Complete\n");
-      remove(pvt_name);
-      return down;
-    }
-  }
+  printf("[Client] Sending message to server...\n" );
+  write(*to_server, ACK, sizeof(ACK));
+
+  return prvfd;
 }
